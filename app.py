@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import ccxt
+import sys
 
 app = Flask(__name__)
 
@@ -18,27 +19,37 @@ def webhook():
     if not data:
         return jsonify({"error": "No data received"}), 400
 
-    symbol = data.get('symbol', 'BTCUSDT')
-    action = data.get('action', '').lower()        # buy ya sell
-    amount_usd = float(data.get('amount_usd', 50))  # Jeb ke dollar ($50)
-    leverage = int(data.get('leverage', 10))       # Leverage (10x)
+    # TradingView se data lena
+    raw_symbol = data.get('symbol', 'BTCUSDT').upper()
+    action = data.get('action', '').lower()        
+    amount_usd = float(data.get('amount_usd', 50))  
+    leverage = int(data.get('leverage', 10))       
+
+    # AUTOMATIC SYMBOL FIX (ETHUSDT -> ETH/USDT)
+    if '/' not in raw_symbol:
+        if raw_symbol.endswith('USDT'):
+            symbol = raw_symbol.replace('USDT', '/USDT')
+        else:
+            symbol = f"{raw_symbol}/USDT"
+    else:
+        symbol = raw_symbol
 
     try:
-        # 1. Leverage Set Karna (Agar demo account par error aaye toh skip ho jaye)
+        # 1. Leverage Set Karna
         try:
             exchange.set_leverage(leverage, symbol)
-        except Exception:
-            pass
+        except Exception as le:
+            print(f"Leverage set karne mein masla (Ignored): {str(le)}")
 
         # 2. Market Price Fetch Karna
         ticker = exchange.fetch_ticker(symbol)
         current_price = ticker['last']
 
-        # Normal Calculation: Position Size = Dollar * Leverage
+        # Normal Calculation
         total_position_value = amount_usd * leverage
         coin_amount = total_position_value / current_price
         
-        # Simple rounding taake error na aaye
+        # Safe Rounding
         coin_amount = round(coin_amount, 3) if 'BTC' in symbol else round(coin_amount, 2)
 
         order_side = 'BUY' if action == 'buy' else 'SELL'
@@ -48,6 +59,8 @@ def webhook():
         return jsonify({"status": "success", "order": order}), 200
 
     except Exception as e:
+        # ERROR LOGS MEIN PRINT KARNE KE LIYE
+        print(f"!!! CRITICAL ERROR !!!: {str(e)}", file=sys.stderr)
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
