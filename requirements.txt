@@ -1,2 +1,2 @@
 flask
-ccxt
+ccxt>=4.4.0
