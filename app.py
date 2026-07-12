@@ -4,14 +4,22 @@ import sys
 
 app = Flask(__name__)
 
-# Binance Demo Connection
+# Binance Demo Connection (Naye Configuration Ke Saath)
 exchange = ccxt.binance({
     'apiKey': 'TuDUSjBSxDCULlcDu8DBmAhcwJfYQRDqGdG6E74Mo8Vja13glFAkiXUZiUDIaZvP',       
     'secret': '9VvaAKUhYVM8h8aVuWz7yF0CnLs6oRq5cn4F9kmHSa8Uj48YwNDXSFUgAfMpiFJf',   
     'enableRateLimit': True,
-    'options': {'defaultType': 'future'}
+    'options': {'defaultType': 'future'},
+    'urls': {
+        'api': {
+            'fapiPublic': 'https://fapi.binancefuture.com',
+            'fapiPrivate': 'https://fapi.binancefuture.com',
+        }
+    }
 })
-exchange.set_sandbox_mode(True) 
+
+# Naye Demo trading platform ke liye sandbox False hona lazmi hai
+exchange.set_sandbox_mode(False) 
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
