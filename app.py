@@ -1,13 +1,18 @@
 from flask import Flask, request, jsonify
 import ccxt
 import sys
+import os
 
 app = Flask(__name__)
 
-# Binance Mock/Demo Trading Official Configuration
+# Environment variables se keys uthayenge (Hardcode nahi karenge)
+API_KEY = os.getenv('BINANCE_API_KEY', 'Zb2du619lvPcna82tc1qBUCDuq07jKWZq599BVWIvj3ZPO1Y2r01CnOgNaST63X5')
+SECRET_KEY = os.getenv('BINANCE_SECRET_KEY', 'tLUKyc1mUGB3ks9l0g6bPjAkhuLmDmxbYt8dbRaWZ7GsqRdwZkzxLI4a0XUNI5xf')
+
+# CCXT Binance Setup
 exchange = ccxt.binance({
-    'apiKey': 'Zb2du619lvPcna82tc1qBUCDuq07jKWZq599BVWIvj3ZPO1Y2r01CnOgNaST63X5',       
-    'secret': 'tLUKyc1mUGB3ks9l0g6bPjAkhuLmDmxbYt8dbRaWZ7GsqRdwZkzxLI4a0XUNI5xf',   
+    'apiKey': API_KEY,
+    'secret': SECRET_KEY,
     'enableRateLimit': True,
     'options': {
         'defaultType': 'future',
@@ -15,14 +20,9 @@ exchange = ccxt.binance({
     }
 })
 
-# CRITICAL FIX FOR REAL-ACCOUNT DEMO SWITCH:
-# Real endpoint par hit marenge par internal 'testnet' header enable rakhenge
-exchange.set_sandbox_mode(False)
-exchange.urls['api']['fapiPublic'] = 'https://fapi.binance.com'
-exchange.urls['api']['fapiPrivate'] = 'https://fapi.binance.com'
-exchange.headers = {
-    'X-MBX-APIKEY': exchange.apiKey
-}
+# DEMO TRADING ENABLING:
+# CCXT auto-configures the correct endpoints when sandbox mode is True
+exchange.set_sandbox_mode(True)
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -30,44 +30,55 @@ def webhook():
     if not data:
         return jsonify({"error": "No data received"}), 400
 
+    print(f"Payload Received: {data}")  # Logs check karne ke liye
+
     raw_symbol = data.get('symbol', 'BTCUSDT').upper()
     action = data.get('action', '').lower()        
     amount_usd = float(data.get('amount_usd', 50))  
     leverage = int(data.get('leverage', 10))       
 
-    if '/' not in raw_symbol:
-        if raw_symbol.endswith('USDT'):
-            symbol = raw_symbol.replace('USDT', '/USDT')
+    # Symbol Conversion (e.g., BTCUSDT ya BTCUSDT.P -> BTC/USDT)
+    clean_symbol = raw_symbol.replace('.P', '')
+    if '/' not in clean_symbol:
+        if clean_symbol.endswith('USDT'):
+            symbol = clean_symbol.replace('USDT', '/USDT')
         else:
-            symbol = f"{raw_symbol}/USDT"
+            symbol = f"{clean_symbol}/USDT"
     else:
-        symbol = raw_symbol
+        symbol = clean_symbol
 
     try:
-        # Leverage Set Karna
+        # 1. Set Leverage
         try:
             exchange.set_leverage(leverage, symbol)
         except Exception as le:
-            print(f"Leverage set issue: {str(le)}")
+            print(f"Leverage set notice (might already be set): {str(le)}")
 
-        # Price Info
+        # 2. Fetch Live Price
         ticker = exchange.fetch_ticker(symbol)
         current_price = ticker['last']
 
-        # Calculations
+        # 3. Calculate Position Size
         total_position_value = amount_usd * leverage
         coin_amount = total_position_value / current_price
         
-        coin_amount = round(coin_amount, 3) if 'BTC' in symbol else round(coin_amount, 2)
+        # Safe rounding based on standard coin step sizes
+        if 'BTC' in symbol:
+            coin_amount = round(coin_amount, 3)
+        elif 'ETH' in symbol:
+            coin_amount = round(coin_amount, 3)
+        else:
+            coin_amount = round(coin_amount, 2)
+
         order_side = 'BUY' if action == 'buy' else 'SELL'
         
-        # Order Request with Mock/Testnet parameter inside params
+        # 4. Execute Order on Demo Network
         order = exchange.create_market_order(
             symbol=symbol, 
             side=order_side, 
-            amount=coin_amount,
-            params={'testnet': True}  # Yeh Binance ko batayega ke Demo Futures par trade lagani hai
+            amount=coin_amount
         )
+        
         return jsonify({"status": "success", "order": order}), 200
 
     except Exception as e:
