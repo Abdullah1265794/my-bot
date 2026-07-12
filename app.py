@@ -4,10 +4,10 @@ import sys
 
 app = Flask(__name__)
 
-# Binance Demo Connection (Naye Configuration Ke Saath)
+# Binance Demo Connection (Nayi Keys Ke Saath)
 exchange = ccxt.binance({
-    'apiKey': 'TuDUSjBSxDCULlcDu8DBmAhcwJfYQRDqGdG6E74Mo8Vja13glFAkiXUZiUDIaZvP',       
-    'secret': '9VvaAKUhYVM8h8aVuWz7yF0CnLs6oRq5cn4F9kmHSa8Uj48YwNDXSFUgAfMpiFJf',   
+    'apiKey': 'Zb2du619lvPcna82tc1qBUCDuq07jKWZq599BVWIvj3ZPO1Y2r01CnOgNaST63X5',       
+    'secret': 'tLUKyc1mUGB3ks9l0g6bPjAkhuLmDmxbYt8dbRaWZ7GsqRdwZkzxLI4a0XUNI5xf',   
     'enableRateLimit': True,
     'options': {'defaultType': 'future'},
     'urls': {
@@ -18,7 +18,7 @@ exchange = ccxt.binance({
     }
 })
 
-# Naye Demo trading platform ke liye sandbox False hona lazmi hai
+# Naye Demo network ke liye sandbox mode False rahega
 exchange.set_sandbox_mode(False) 
 
 @app.route('/webhook', methods=['POST'])
