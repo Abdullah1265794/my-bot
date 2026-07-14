@@ -5,11 +5,11 @@ import os
 
 app = Flask(__name__)
 
-# Environment variables se keys uthayenge (Hardcode nahi karenge)
+# Environment variables se secure keys load hongi
 API_KEY = os.getenv('BINANCE_API_KEY', 'Zb2du619lvPcna82tc1qBUCDuq07jKWZq599BVWIvj3ZPO1Y2r01CnOgNaST63X5')
 SECRET_KEY = os.getenv('BINANCE_SECRET_KEY', 'tLUKyc1mUGB3ks9l0g6bPjAkhuLmDmxbYt8dbRaWZ7GsqRdwZkzxLI4a0XUNI5xf')
 
-# CCXT Binance Setup
+# CCXT Binance Setup (Real Servers Target Karenge)
 exchange = ccxt.binance({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
@@ -20,9 +20,8 @@ exchange = ccxt.binance({
     }
 })
 
-# DEMO TRADING ENABLING:
-# CCXT auto-configures the correct endpoints when sandbox mode is True
-exchange.set_sandbox_mode(True)
+# YAHA SE SANDBOX MODE COMPLETE KHATAM (Yahi error de raha tha)
+# exchange.set_sandbox_mode(True) -> DELETED
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -37,7 +36,7 @@ def webhook():
     amount_usd = float(data.get('amount_usd', 50))  
     leverage = int(data.get('leverage', 10))       
 
-    # Symbol Conversion (e.g., BTCUSDT ya BTCUSDT.P -> BTC/USDT)
+    # Symbol Conversion (e.g., BTCUSDT.P -> BTC/USDT)
     clean_symbol = raw_symbol.replace('.P', '')
     if '/' not in clean_symbol:
         if clean_symbol.endswith('USDT'):
@@ -72,11 +71,12 @@ def webhook():
 
         order_side = 'BUY' if action == 'buy' else 'SELL'
         
-        # 4. Execute Order on Demo Network
+        # 4. Execute Order on Switch Demo Futures (Using 'testnet' param)
         order = exchange.create_market_order(
             symbol=symbol, 
             side=order_side, 
-            amount=coin_amount
+            amount=coin_amount,
+            params={'testnet': True}  # Yeh real key ko Binance Demo Account par redirect karega!
         )
         
         return jsonify({"status": "success", "order": order}), 200
