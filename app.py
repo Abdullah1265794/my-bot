@@ -15,6 +15,12 @@ exchange = ccxt.binance({
 })
 exchange.enable_demo_trading(True)
 
+# 1. UptimeRobot ke liye Home Route (Iski wajah se monitor Green ho jayega)
+@app.route('/')
+def home():
+    return "Bot is Active!", 200
+
+# 2. TradingView Webhook Route
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json or {}
@@ -28,11 +34,13 @@ def webhook():
         # Load markets for exact price/amount precision
         exchange.load_markets()
 
-        # 1. Set Leverage
-        try: exchange.set_leverage(leverage, symbol)
-        except: pass
+        # Set Leverage
+        try: 
+            exchange.set_leverage(leverage, symbol)
+        except: 
+            pass
 
-        # 2. Get Price and Calculate Size with Binance Precision
+        # Get Price and Calculate Size with Binance Precision
         ticker = exchange.fetch_ticker(symbol)
         price = ticker['last']
         
@@ -42,7 +50,7 @@ def webhook():
         position_side = 'LONG' if action == 'buy' else 'SHORT'
         order_side = 'BUY' if action == 'buy' else 'SELL'
 
-        # 3. Open Market Position (Hedge Mode)
+        # Open Market Position (Hedge Mode)
         order = exchange.create_market_order(
             symbol=symbol,
             side=order_side,
@@ -50,7 +58,7 @@ def webhook():
             params={'positionSide': position_side}
         )
 
-        # 4. Handle TP/SL with Binance Price Precision
+        # Handle TP/SL with Binance Price Precision
         tp_pct = float(data.get('tp', 1.0)) / 100.0  
         sl_pct = float(data.get('sl', 1.0)) / 100.0  
 
@@ -66,7 +74,7 @@ def webhook():
         # Take Profit (Limit Order)
         exchange.create_order(symbol, 'limit', opp_side, coin_amount, tp_price, {'positionSide': position_side, 'reduceOnly': True})
         
-        # Stop Loss (Stop Market Order - Price passed as None, stopPrice in params)
+        # Stop Loss (Stop Market Order)
         exchange.create_order(symbol, 'stop_market', opp_side, coin_amount, None, {'stopPrice': sl_price, 'positionSide': position_side, 'reduceOnly': True})
 
         return jsonify({"status": "success", "message": "Hedge trade and TP/SL set!"}), 200
