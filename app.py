@@ -6,24 +6,20 @@ import traceback
 
 app = Flask(__name__)
 
-# SECURITY SETUP
-# Render ke Environment Variables se keys load hongi
 API_KEY = os.getenv('BINGX_API_KEY')
 SECRET_KEY = os.getenv('BINGX_SECRET_KEY')
 
-# BINGX CONNECTION SETUP
 exchange = ccxt.bingx({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
     'enableRateLimit': True,
     'options': {
-        'defaultType': 'future',  # BingX Linear Perpetual Futures ke liye
+        'defaultType': 'future',  # Perpetual Futures
         'adjustForTimeDifference': True
     }
 })
 
-# DEMO / SANDBOX MODE ENABLED
-# Yeh line aapki same API key ko VST (Virtual Account) par redirect kar degi
+# DEMO / SANDBOX MODE
 exchange.set_sandbox_mode(True)
 
 @app.route('/')
@@ -36,18 +32,28 @@ def webhook():
     
     action = data.get('action', '').lower()      
     if action not in ['buy', 'sell']:
-        return jsonify({"status": "error", "message": f"Invalid action '{action}'. Must be 'buy' or 'sell'."}), 400
+        return jsonify({"status": "error", "message": f"Invalid action '{action}'"}), 400
         
-    # Currency formatting for BingX Futures (e.g., BTC/USDT)
+    # FIX: Dynamic Market Symbol Resolution for Sandbox
     raw_symbol = data.get('symbol', 'BTCUSDT').upper().replace('.P', '')
-    symbol = raw_symbol if '/' in raw_symbol else f"{raw_symbol.replace('USDT', '')}/USDT"
     
-    amount_usd = float(data.get('amount_usd', 50))
-    leverage = int(data.get('leverage', 10))
-
     try:
-        # Load exchange markets
-        exchange.load_markets()
+        # 1. Sabse pehle demo markets load karein
+        markets = exchange.load_markets()
+        
+        # 2. Match karne ki koshish karein ke exact name kya hai (e.g., BTC/USDT ya BTC-USDT)
+        # Agar markets me directly key mil jaye ya cross check ho
+        formatted_target = raw_symbol if '/' in raw_symbol else f"{raw_symbol.replace('USDT', '')}/USDT"
+        
+        if formatted_target in markets:
+            symbol = formatted_target
+        else:
+            # Agar standard slash kaam na kare, toh exchange standard symbol backup select karein
+            alternatives = [m for m in markets if raw_symbol in m.replace('/', '').replace('-', '')]
+            symbol = alternatives[0] if alternatives else formatted_target
+
+        amount_usd = float(data.get('amount_usd', 50))
+        leverage = int(data.get('leverage', 10))
 
         # Set Leverage safely
         try: 
@@ -55,20 +61,16 @@ def webhook():
         except Exception:
             pass
 
-        # Get current entry price from Demo Market
         ticker = exchange.fetch_ticker(symbol)
         price = ticker['last']
 
-        # Calculate exact contract/coin units
         raw_amount = (amount_usd * leverage) / price
         coin_amount = float(exchange.amount_to_precision(symbol, raw_amount))
 
         side = 'BUY' if action == 'buy' else 'SELL'
-
-        # Params khali rakhe hain taake simple order testing bypass ho sake
         params = {}
 
-        # Market Entry Execution (On Demo Account)
+        # Order Execution
         order = exchange.create_order(
             symbol=symbol,
             type='market',
@@ -77,12 +79,12 @@ def webhook():
             params=params
         )
 
-        return jsonify({"status": "success", "message": "Demo Order processed successfully!", "order_id": order.get('id')}), 200
+        return jsonify({"status": "success", "message": f"Demo Order placed on {symbol}!", "order_id": order.get('id')}), 200
         
     except Exception as e:
-        print("--- BINGX DEMO EXECUTION ERROR TRACEBACK ---", file=sys.stderr)
+        print("--- BINGX SANDBOX ERROR TRACEBACK ---", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
-        print("--------------------------------------------", file=sys.stderr)
+        print("---------------------------------------", file=sys.stderr)
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
