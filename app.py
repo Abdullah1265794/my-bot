@@ -2,19 +2,22 @@ from flask import Flask, request, jsonify
 import ccxt
 import os
 import sys
+import traceback
 
 app = Flask(__name__)
 
-API_KEY = os.getenv('BINGX_API_KEY', 'IUjJvoTXTjipuk3u5fh7lEoDPwpXhKfWAW0DJ0CAiXnA9jxkv78u6fiwC3vm3zyFciFCHgEy0x6tM6xGbmpjg')
-SECRET_KEY = os.getenv('BINGX_SECRET_KEY', 'lbsqpPVBDndTF841QJgLYuY4IaybjnPH5K0UBS2id81WanPjDS1rYYA7v2ol6SJXW5yQUlHoOKc5hGkj3l7A')
+# SECURITY FIX: Hardcoded keys ko remove kar diya hai. 
+# Ab ye Render ke Environment Variables se automatically keys uthaega.
+API_KEY = os.getenv('BINGX_API_KEY')
+SECRET_KEY = os.getenv('BINGX_SECRET_KEY')
 
-# BingX Custom Endpoint Connection
+# BingX Connection Setup
 exchange = ccxt.bingx({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
     'enableRateLimit': True,
     'options': {
-        'defaultType': 'swap'
+        'defaultType': 'swap'  # Futures/Swap ke liye
     }
 })
 
@@ -26,21 +29,26 @@ def home():
 def webhook():
     data = request.json or {}
     
+    # 1. Action Validation (Agar 'buy' ya 'sell' ke ilawa kuch aya to error handle hoga)
+    action = data.get('action', '').lower()      
+    if action not in ['buy', 'sell']:
+        return jsonify({"status": "error", "message": f"Invalid action '{action}'. Must be 'buy' or 'sell'."}), 400
+        
     # Currency formatting for BingX
     raw_symbol = data.get('symbol', 'BTCUSDT').upper().replace('.P', '')
     symbol = raw_symbol if '/' in raw_symbol else f"{raw_symbol.replace('USDT', '')}/USDT"
     
-    action = data.get('action', '').lower()      
     amount_usd = float(data.get('amount_usd', 50))
     leverage = int(data.get('leverage', 10))
 
     try:
+        # Markets load karna zaroori hai precision check karne ke liye
         exchange.load_markets()
 
         # Set Leverage safely
         try: 
             exchange.set_leverage(leverage, symbol)
-        except Exception as lev_err:
+        except Exception:
             pass
 
         # Get current entry price
@@ -67,7 +75,7 @@ def webhook():
         tp_str = exchange.price_to_precision(symbol, tp_price)
         sl_str = exchange.price_to_precision(symbol, sl_price)
 
-        # Simplified bracket param to prevent 500 rejection
+        # Bracket parameters for Take Profit & Stop Loss
         params = {
             'stopLossPrice': float(sl_str),
             'takeProfitPrice': float(tp_str)
@@ -82,10 +90,13 @@ def webhook():
             params=params
         )
 
-        return jsonify({"status": "success", "message": "Order processed successfully!"}), 200
+        return jsonify({"status": "success", "message": "Order processed successfully!", "order_id": order.get('id')}), 200
         
     except Exception as e:
-        print(f"BINGX EXECUTION ERROR: {str(e)}", file=sys.stderr)
+        # BETTER LOGGING: Ab Render logs me exact line aur error poora nazar aayega
+        print("--- BINGX EXECUTION ERROR TRACEBACK ---", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        print("---------------------------------------", file=sys.stderr)
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
