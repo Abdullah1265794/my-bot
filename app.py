@@ -4,81 +4,76 @@ import os
 
 app = Flask(__name__)
 
-API_KEY = os.getenv('BINANCE_API_KEY', 'Zb2du619lvPcna82tc1qBUCDuq07jKWZq599BVWIvj3ZPO1Y2r01CnOgNaST63X5')
-SECRET_KEY = os.getenv('BINANCE_SECRET_KEY', 'tLUKyc1mUGB3ks9l0g6bPjAkhuLmDmxbYt8dbRaWZ7GsqRdwZkzxLI4a0XUNI5xf')
+# BingX Keys Jo Aapne Share Kin
+API_KEY = os.getenv('BINGX_API_KEY', 'IUjJvoTXTjipuk3u5fh7lEoDPwpXhKfWAW0DJ0CAiXnA9jxkv78u6fiwC3vm3zyFciFCHgEy0x6tM6xGbmpjg')
+SECRET_KEY = os.getenv('BINGX_SECRET_KEY', 'lbsqpPVBDndTF841QJgLYuY4IaybjnPH5K0UBS2id81WanPjDS1rYYA7v2ol6SJXW5yQUlHoOKc5hGkj3l7A')
 
-exchange = ccxt.binance({
+# BingX Exchange Setup with Sandbox (Demo/VST) active
+exchange = ccxt.bingx({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
     'enableRateLimit': True,
-    'options': {'defaultType': 'future', 'adjustForTimeDifference': True}
+    'options': {
+        'defaultType': 'swap',  # Perpetual Futures ko BingX par swap bolte hain
+    }
 })
-exchange.enable_demo_trading(True)
+exchange.set_sandbox_mode(True)  # Strictly routes all trades to Virtual USDT (Demo Account)
 
-# 1. UptimeRobot ke liye Home Route (Iski wajah se monitor Green ho jayega)
+# Startup par markets load karein taake webhook fast chale
+try:
+    exchange.load_markets()
+except Exception as e:
+    print(f"Initial market load failed: {str(e)}")
+
+# UptimeRobot / Render Health Check
 @app.route('/')
 def home():
-    return "Bot is Active!", 200
+    return "BingX Bot is Active!", 200
 
-# 2. TradingView Webhook Route
+# TradingView Webhook Route
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json or {}
+    
+    # Format symbol according to BingX standards (e.g., BTC/USDT)
     raw_symbol = data.get('symbol', 'BTCUSDT').upper().replace('.P', '')
     symbol = raw_symbol if '/' in raw_symbol else f"{raw_symbol.replace('USDT', '')}/USDT"
-    action = data.get('action', '').lower()
+    
+    action = data.get('action', '').lower()      # 'buy' ya 'sell'
     amount_usd = float(data.get('amount_usd', 50))
     leverage = int(data.get('leverage', 10))
 
     try:
-        # Load markets for exact price/amount precision
-        exchange.load_markets()
-
-        # Set Leverage
+        # 1. Set Leverage
         try: 
             exchange.set_leverage(leverage, symbol)
-        except: 
-            pass
+        except Exception as lev_err:
+            print(f"Leverage setting error: {str(lev_err)}")
 
-        # Get Price and Calculate Size with Binance Precision
-        ticker = exchange.fetch_ticker(symbol)
-        price = ticker['last']
+        # 2. Market Execution Parameters
+        side = 'BUY' if action == 'buy' else 'SELL'
         
-        raw_amount = (amount_usd * leverage) / price
-        coin_amount = float(exchange.amount_to_precision(symbol, raw_amount))
+        # 3. Handle TP/SL Percentages (Default 1% if not specified in signal)
+        tp_pct = float(data.get('tp', 1.0))
+        sl_pct = float(data.get('sl', 1.0))
 
-        position_side = 'LONG' if action == 'buy' else 'SHORT'
-        order_side = 'BUY' if action == 'buy' else 'SELL'
+        # FIXED SOLUTION: BingX bracket order parameter jo TP aur SL ko entry ke sath hi LIVE active kar deta hai
+        params = {
+            'takeProfit': {'triggerPrice': f"{tp_pct}%"},
+            'stopLoss': {'triggerPrice': f"{sl_pct}%"}
+        }
 
-        # Open Market Position (Hedge Mode)
+        # 4. Open Order (BingX directly handles margin in USD amount)
         order = exchange.create_market_order(
             symbol=symbol,
-            side=order_side,
-            amount=coin_amount,
-            params={'positionSide': position_side}
+            side=side,
+            amount=amount_usd,
+            params=params
         )
 
-        # Handle TP/SL with Binance Price Precision
-        tp_pct = float(data.get('tp', 1.0)) / 100.0  
-        sl_pct = float(data.get('sl', 1.0)) / 100.0  
-
-        raw_tp = price * (1 + tp_pct) if action == 'buy' else price * (1 - tp_pct)
-        raw_sl = price * (1 - sl_pct) if action == 'buy' else price * (1 + sl_pct)
-        
-        tp_price = float(exchange.price_to_precision(symbol, raw_tp))
-        sl_price = float(exchange.price_to_precision(symbol, raw_sl))
-
-        # Place TP/SL Orders
-        opp_side = 'SELL' if action == 'buy' else 'BUY'
-        
-        # Take Profit (Limit Order)
-        exchange.create_order(symbol, 'limit', opp_side, coin_amount, tp_price, {'positionSide': position_side, 'reduceOnly': True})
-        
-        # Stop Loss (Stop Market Order)
-        exchange.create_order(symbol, 'stop_market', opp_side, coin_amount, None, {'stopPrice': sl_price, 'positionSide': position_side, 'reduceOnly': True})
-
-        return jsonify({"status": "success", "message": "Hedge trade and TP/SL set!"}), 200
+        return jsonify({"status": "success", "message": "BingX trade placed and TP/SL activated successfully!"}), 200
     except Exception as e:
+        print(f"Trading Error: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
