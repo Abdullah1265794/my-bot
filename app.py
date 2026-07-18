@@ -6,18 +6,20 @@ import traceback
 
 app = Flask(__name__)
 
-# SECURITY FIX: Hardcoded keys ko remove kar diya hai. 
-# Ab ye Render ke Environment Variables se automatically keys uthaega.
+# SECURITY & RENDER SETUP
+# Render ke environment variables se keys automatically load hongi
 API_KEY = os.getenv('BINGX_API_KEY')
 SECRET_KEY = os.getenv('BINGX_SECRET_KEY')
 
-# BingX Connection Setup
+# BINGX CONNECTION FIXED
+# 'swap' ko 'future' se badal diya hai jo BingX Perpetual Futures ke liye zaroori hai
 exchange = ccxt.bingx({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
     'enableRateLimit': True,
     'options': {
-        'defaultType': 'swap'  # Futures/Swap ke liye
+        'defaultType': 'future',  # FIXED: BingX linear futures ke liye 'future' use hota hai
+        'adjustForTimeDifference': True
     }
 })
 
@@ -29,12 +31,12 @@ def home():
 def webhook():
     data = request.json or {}
     
-    # 1. Action Validation (Agar 'buy' ya 'sell' ke ilawa kuch aya to error handle hoga)
+    # Action Validation
     action = data.get('action', '').lower()      
     if action not in ['buy', 'sell']:
         return jsonify({"status": "error", "message": f"Invalid action '{action}'. Must be 'buy' or 'sell'."}), 400
         
-    # Currency formatting for BingX
+    # Currency formatting for BingX Futures (e.g., BTC/USDT)
     raw_symbol = data.get('symbol', 'BTCUSDT').upper().replace('.P', '')
     symbol = raw_symbol if '/' in raw_symbol else f"{raw_symbol.replace('USDT', '')}/USDT"
     
@@ -42,7 +44,7 @@ def webhook():
     leverage = int(data.get('leverage', 10))
 
     try:
-        # Markets load karna zaroori hai precision check karne ke liye
+        # Load exchange markets
         exchange.load_markets()
 
         # Set Leverage safely
@@ -93,7 +95,6 @@ def webhook():
         return jsonify({"status": "success", "message": "Order processed successfully!", "order_id": order.get('id')}), 200
         
     except Exception as e:
-        # BETTER LOGGING: Ab Render logs me exact line aur error poora nazar aayega
         print("--- BINGX EXECUTION ERROR TRACEBACK ---", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         print("---------------------------------------", file=sys.stderr)
