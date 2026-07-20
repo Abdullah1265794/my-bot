@@ -5,16 +5,14 @@ import ccxt
 
 app = Flask(__name__)
 
-# BingX API Configuration (Apni API keys Render ke Environment Variables mein lazmi dalein)
 API_KEY = os.getenv('BINGX_API_KEY', 'YOUR_API_KEY')
 SECRET_KEY = os.getenv('BINGX_SECRET_KEY', 'YOUR_SECRET_KEY')
 
-# BingX Exchange Setup (Perpetual Futures/Swap Mode)
 exchange = ccxt.bingx({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
     'options': {
-        'defaultType': 'swap',  # Perpetual Futures trade ke liye zaroori ha
+        'defaultType': 'swap',
     },
     'enableRateLimit': True
 })
@@ -32,22 +30,20 @@ def webhook():
 
         print("Received Signal Data:", data)
 
-        # 1. TradingView Payload se data extract karna
-        symbol = data.get('symbol', 'BNBUSDT')          # E.g., BNBUSDT
-        action = data.get('action').lower()             # buy ya sell
-        amount_usd = float(data.get('amount_usd', 50))  # Margin USD mein
-        leverage = int(data.get('leverage', 50))        # Leverage value
+        symbol = data.get('symbol', 'BNBUSDT')          
+        action = data.get('action').lower()             
+        amount_usd = float(data.get('amount_usd', 50))  
+        leverage = int(data.get('leverage', 50))        
 
-        # Direct ROI Input (E.g., tp: 100, sl: 100)
         roi_tp = float(data.get('tp', 100))
         roi_sl = float(data.get('sl', 100))
 
-        # CCXT ke liye symbol format convert karna (BNBUSDT -> BNB/USDT:USDT)
         ccxt_symbol = f"{symbol[:3]}/{symbol[3:]}:{symbol[3:]}"
+        leverage_symbol = f"{symbol[:3]}/{symbol[3:]}"
 
-        # 2. SET LEVERAGE SAFELY FOR BINGX FUTURES
+        # SET LEVERAGE SAFELY
         try: 
-            exchange.set_leverage(leverage, ccxt_symbol, params={'side': 'BOTH'})
+            exchange.set_leverage(leverage, leverage_symbol, params={'side': 'BOTH'})
         except Exception as leverage_error:
             print(f"Leverage Set Warning: {leverage_error}", file=sys.stderr)
             try:
@@ -57,15 +53,12 @@ def webhook():
             except Exception:
                 pass
 
-        # Market price fetch karna targets calculate karne ke liye
         ticker = exchange.fetch_ticker(ccxt_symbol)
         price = float(ticker['last'])
 
-        # 3. Volume Calculation (Margin * Leverage / Price)
         raw_amount = (amount_usd * leverage) / price
         coin_amount = float(exchange.amount_to_precision(ccxt_symbol, raw_amount))
 
-        # 4. Side and PositionSide allocation for Hedge Mode
         if action == 'buy':
             side = 'BUY'
             position_side = 'LONG'
@@ -73,38 +66,33 @@ def webhook():
             side = 'SELL'
             position_side = 'SHORT'
 
-        # 5. ROI Formula: Price Change % = ROI % / Leverage
+        # ROI to Price conversion logic
         tp_price_change = roi_tp / leverage
         sl_price_change = roi_sl / leverage
 
-        # Exact SL and TP prices calculate karna (Jaisa exchange screen par hota ha)
         if position_side == 'LONG':
             tp_price = price * (1 + (tp_price_change / 100))
             sl_price = price * (1 - (sl_price_change / 100))
-        else:  # SHORT
+        else:
             tp_price = price * (1 - (tp_price_change / 100))
             sl_price = price * (1 + (sl_price_change / 100))
 
-        # Price ko precision ke mutabiq round karna
         tp_price = float(exchange.price_to_precision(ccxt_symbol, tp_price))
         sl_price = float(exchange.price_to_precision(ccxt_symbol, sl_price))
 
-        print(f"Final Execution -> Side: {side}, Size: {coin_amount}, TP: {tp_price}, SL: {sl_price}")
-
-        # 6. HEDGE MODE & SL/TP PARAMETERS ATTACHMENT
+        # FIXED BINGX SPECIFIC SL/TP TYPE VALUES
         params = {
             'positionSide': position_side,
             'stopLoss': {
                 'triggerPrice': sl_price,
-                'type': 'market'   # SL hit hotay hi market par trade close
+                'type': 'STOP_LOSS_MARKET'  # Fixed according to logs error
             },
             'takeProfit': {
                 'triggerPrice': tp_price,
-                'type': 'market'   # TP hit hotay hi market par trade close
+                'type': 'TAKE_PROFIT_MARKET' # Fixed according to logs error
             }
         }
 
-        # 7. Final Order Execution
         order = exchange.create_order(
             symbol=ccxt_symbol,
             type='market',
