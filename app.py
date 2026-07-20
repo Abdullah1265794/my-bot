@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from flask import Flask, request, jsonify
 import ccxt
 
@@ -19,7 +20,7 @@ exchange = ccxt.bingx({
 
 @app.route('/')
 def home():
-    return "BingX Trading Bot is Running Successfully!"
+    return "BingX Trading Bot is Running!"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -35,13 +36,13 @@ def webhook():
         amount_usd = float(data.get('amount_usd', 50))  
         leverage = int(data.get('leverage', 50))        
 
-        roi_tp = float(data.get('tp', 100))
+        roi_tp = float(data.get('tp', 150))
         roi_sl = float(data.get('sl', 100))
 
         ccxt_symbol = f"{symbol[:3]}/{symbol[3:]}:{symbol[3:]}"
         leverage_symbol = f"{symbol[:3]}/{symbol[3:]}"
 
-        # 1. SET LEVERAGE (BINGX HEDGE MODE COMPATIBLE)
+        # 1. SET LEVERAGE FOR HEDGE MODE WITH 'BOTH'
         try: 
             exchange.set_leverage(leverage, leverage_symbol, params={'side': 'BOTH'})
         except Exception as leverage_error:
@@ -49,7 +50,6 @@ def webhook():
 
         ticker = exchange.fetch_ticker(ccxt_symbol)
         price = float(ticker['last'])
-
         raw_amount = (amount_usd * leverage) / price
         coin_amount = float(exchange.amount_to_precision(ccxt_symbol, raw_amount))
 
@@ -62,7 +62,7 @@ def webhook():
             position_side = 'SHORT'
             close_side = 'BUY'
 
-        # ROI to Price conversion
+        # ROI to Price math
         tp_price_change = roi_tp / leverage
         sl_price_change = roi_sl / leverage
 
@@ -76,7 +76,7 @@ def webhook():
         tp_price = float(exchange.price_to_precision(ccxt_symbol, tp_price))
         sl_price = float(exchange.price_to_precision(ccxt_symbol, sl_price))
 
-        # 2. PLACE CLEAN MARKET POSITION ORDER (No mixed params)
+        # 2. PLACE PURE CLEAN MARKET ORDER FIRST (No nested parameters to avoid errors)
         order_params = {'positionSide': position_side}
         main_order = exchange.create_order(
             symbol=ccxt_symbol,
@@ -85,9 +85,12 @@ def webhook():
             amount=coin_amount,
             params=order_params
         )
-        print(f"Main Position Opened: {main_order.get('id')}")
+        print(f"Main Position Opened Successfully: {main_order.get('id')}")
 
-        # 3. SEPARATE TAKE PROFIT ORDER (REDUCE-ONLY)
+        # Wait for 1 second to let exchange register the position safely
+        time.sleep(1)
+
+        # 3. PLACE SEPARATE TAKE PROFIT ORDER WITH REDUCE-ONLY
         try:
             tp_params = {
                 'positionSide': position_side,
@@ -101,11 +104,11 @@ def webhook():
                 amount=coin_amount,
                 params=tp_params
             )
-            print(f"TP Trigger Set at: {tp_price}")
+            print(f"Independent TP Trigger Set at: {tp_price}")
         except Exception as tp_err:
-            print(f"TP Trigger Error: {tp_err}", file=sys.stderr)
+            print(f"Auto TP Trigger Error: {tp_err}", file=sys.stderr)
 
-        # 4. SEPARATE STOP LOSS ORDER (REDUCE-ONLY)
+        # 4. PLACE SEPARATE STOP LOSS ORDER WITH REDUCE-ONLY
         try:
             sl_params = {
                 'positionSide': position_side,
@@ -119,13 +122,13 @@ def webhook():
                 amount=coin_amount,
                 params=sl_params
             )
-            print(f"SL Trigger Set at: {sl_price}")
+            print(f"Independent SL Trigger Set at: {sl_price}")
         except Exception as sl_err:
-            print(f"SL Trigger Error: {sl_err}", file=sys.stderr)
+            print(f"Auto SL Trigger Error: {sl_err}", file=sys.stderr)
 
         return jsonify({
             "status": "success",
-            "message": "Main position opened and independent triggers set successfully",
+            "message": "Main trade executed, separate triggers handling SL/TP",
             "order_id": main_order.get('id')
         }), 200
 
