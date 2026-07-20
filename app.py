@@ -1,25 +1,71 @@
-# SET LEVERAGE SAFELY FOR BINGX FUTURES
+import os
+import sys
+from flask import Flask, request, jsonify
+import ccxt
+
+app = Flask(__name__)
+
+# BingX API Configuration (Apni API keys Render ke Environment Variables mein lazmi dalein)
+API_KEY = os.getenv('BINGX_API_KEY', 'YOUR_API_KEY')
+SECRET_KEY = os.getenv('BINGX_SECRET_KEY', 'YOUR_SECRET_KEY')
+
+# BingX Exchange Setup (Perpetual Futures/Swap Mode)
+exchange = ccxt.bingx({
+    'apiKey': API_KEY,
+    'secret': SECRET_KEY,
+    'options': {
+        'defaultType': 'swap',  # Perpetual Futures trade ke liye zaroori ha
+    },
+    'enableRateLimit': True
+})
+
+@app.route('/')
+def home():
+    return "BingX Trading Bot is Running Successfully!"
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"status": "error", "message": "No JSON payload received"}), 400
+
+        print("Received Signal Data:", data)
+
+        # 1. TradingView Payload se data extract karna
+        symbol = data.get('symbol', 'BNBUSDT')          # E.g., BNBUSDT
+        action = data.get('action').lower()             # buy ya sell
+        amount_usd = float(data.get('amount_usd', 50))  # Margin USD mein
+        leverage = int(data.get('leverage', 50))        # Leverage value
+
+        # Direct ROI Input (E.g., tp: 100, sl: 100)
+        roi_tp = float(data.get('tp', 100))
+        roi_sl = float(data.get('sl', 100))
+
+        # CCXT ke liye symbol format convert karna (BNBUSDT -> BNB/USDT:USDT)
+        ccxt_symbol = f"{symbol[:3]}/{symbol[3:]}:{symbol[3:]}"
+
+        # 2. SET LEVERAGE SAFELY FOR BINGX FUTURES
         try: 
-            # BingX perpetual futures ke liye leverage params ke sath set hoti hai
-            exchange.set_leverage(leverage, symbol, params={'side': 'BOTH'})
+            exchange.set_leverage(leverage, ccxt_symbol, params={'side': 'BOTH'})
         except Exception as leverage_error:
             print(f"Leverage Set Warning: {leverage_error}", file=sys.stderr)
-            # Agar exchange par leverage change nahi ho saki, toh hum default select shuda leverage (20x) ko fetch kar lete hain
             try:
-                position_risk = exchange.fetch_position_risk([symbol])
+                position_risk = exchange.fetch_position_risk([ccxt_symbol])
                 if position_risk:
                     leverage = int(position_risk[0].get('leverage', leverage))
             except Exception:
                 pass
 
-        ticker = exchange.fetch_ticker(symbol)
+        # Market price fetch karna targets calculate karne ke liye
+        ticker = exchange.fetch_ticker(ccxt_symbol)
         price = float(ticker['last'])
 
-        # Volume Calculation based on verified leverage
+        # 3. Volume Calculation (Margin * Leverage / Price)
         raw_amount = (amount_usd * leverage) / price
-        coin_amount = float(exchange.amount_to_precision(symbol, raw_amount))
+        coin_amount = float(exchange.amount_to_precision(ccxt_symbol, raw_amount))
 
-        # FIX: Side and PositionSide allocation for Hedge Mode
+        # 4. Side and PositionSide allocation for Hedge Mode
         if action == 'buy':
             side = 'BUY'
             position_side = 'LONG'
@@ -27,14 +73,7 @@
             side = 'SELL'
             position_side = 'SHORT'
 
-        # ==========================================
-        # NEW FIX: ROI LOGIC & SL/TP TRIGGER CALCULATION
-        # ==========================================
-        # TradingView JSON payload se direct ROI % lena (e.g., tp: 100, sl: 100)
-        roi_tp = float(data.get('tp', 100))
-        roi_sl = float(data.get('sl', 100))
-
-        # Formula: Price Change % = ROI % / Leverage
+        # 5. ROI Formula: Price Change % = ROI % / Leverage
         tp_price_change = roi_tp / leverage
         sl_price_change = roi_sl / leverage
 
@@ -47,10 +86,12 @@
             sl_price = price * (1 + (sl_price_change / 100))
 
         # Price ko precision ke mutabiq round karna
-        tp_price = float(exchange.price_to_precision(symbol, tp_price))
-        sl_price = float(exchange.price_to_precision(symbol, sl_price))
+        tp_price = float(exchange.price_to_precision(ccxt_symbol, tp_price))
+        sl_price = float(exchange.price_to_precision(ccxt_symbol, sl_price))
 
-        # HEDGE MODE REQUIRED PARAMETERS ATTACHED WITH SL/TP
+        print(f"Final Execution -> Side: {side}, Size: {coin_amount}, TP: {tp_price}, SL: {sl_price}")
+
+        # 6. HEDGE MODE & SL/TP PARAMETERS ATTACHMENT
         params = {
             'positionSide': position_side,
             'stopLoss': {
@@ -62,4 +103,26 @@
                 'type': 'market'   # TP hit hotay hi market par trade close
             }
         }
-        # ==========================================
+
+        # 7. Final Order Execution
+        order = exchange.create_order(
+            symbol=ccxt_symbol,
+            type='market',
+            side=side,
+            amount=coin_amount,
+            params=params
+        )
+
+        return jsonify({
+            "status": "success",
+            "message": "Order placed successfully with SL/TP",
+            "order_id": order.get('id')
+        }), 200
+
+    except Exception as e:
+        print("Critical Error executing order:", str(e), file=sys.stderr)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
