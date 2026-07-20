@@ -62,9 +62,11 @@ def webhook():
         if action == 'buy':
             side = 'BUY'
             position_side = 'LONG'
+            sl_tp_side = 'SELL'  # Long position ko close karne k liye SL/TP Sell orders honge
         else:
             side = 'SELL'
             position_side = 'SHORT'
+            sl_tp_side = 'BUY'   # Short position ko close karne k liye SL/TP Buy orders honge
 
         # ROI to Price conversion logic
         tp_price_change = roi_tp / leverage
@@ -80,31 +82,57 @@ def webhook():
         tp_price = float(exchange.price_to_precision(ccxt_symbol, tp_price))
         sl_price = float(exchange.price_to_precision(ccxt_symbol, sl_price))
 
-        # FIXED BINGX SPECIFIC SL/TP TYPE VALUES
-        params = {
-            'positionSide': position_side,
-            'stopLoss': {
-                'triggerPrice': sl_price,
-                'type': 'STOP_LOSS_MARKET'  # Fixed according to logs error
-            },
-            'takeProfit': {
-                'triggerPrice': tp_price,
-                'type': 'TAKE_PROFIT_MARKET' # Fixed according to logs error
-            }
-        }
-
-        order = exchange.create_order(
+        # 1. MAIN MARKET POSITION ORDER (Bina combined SL/TP params k)
+        order_params = {'positionSide': position_side}
+        main_order = exchange.create_order(
             symbol=ccxt_symbol,
             type='market',
             side=side,
             amount=coin_amount,
-            params=params
+            params=order_params
         )
+        print(f"Main Position Opened: {main_order.get('id')}")
+
+        # 2. SEPARATE TAKE PROFIT ORDER
+        try:
+            tp_params = {
+                'positionSide': position_side,
+                'stopPrice': tp_price,      # Trigger price
+                'workingType': 'MARK_PRICE' # Mark price trigger
+            }
+            exchange.create_order(
+                symbol=ccxt_symbol,
+                type='TAKE_PROFIT_MARKET',
+                side=sl_tp_side,
+                amount=coin_amount,
+                params=tp_params
+            )
+            print(f"Take Profit Set at: {tp_price}")
+        except Exception as tp_err:
+            print(f"Failed to set Take Profit Order: {tp_err}", file=sys.stderr)
+
+        # 3. SEPARATE STOP LOSS ORDER
+        try:
+            sl_params = {
+                'positionSide': position_side,
+                'stopPrice': sl_price,      # Trigger price
+                'workingType': 'MARK_PRICE' # Mark price trigger
+            }
+            exchange.create_order(
+                symbol=ccxt_symbol,
+                type='STOP_LOSS_MARKET',
+                side=sl_tp_side,
+                amount=coin_amount,
+                params=sl_params
+            )
+            print(f"Stop Loss Set at: {sl_price}")
+        except Exception as sl_err:
+            print(f"Failed to set Stop Loss Order: {sl_err}", file=sys.stderr)
 
         return jsonify({
             "status": "success",
-            "message": "Order placed successfully with SL/TP",
-            "order_id": order.get('id')
+            "message": "Main position opened and separate SL/TP triggers placed successfully",
+            "order_id": main_order.get('id')
         }), 200
 
     except Exception as e:
