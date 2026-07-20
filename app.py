@@ -41,7 +41,7 @@ def webhook():
         ccxt_symbol = f"{symbol[:3]}/{symbol[3:]}:{symbol[3:]}"
         leverage_symbol = f"{symbol[:3]}/{symbol[3:]}"
 
-        # 1. SET LEVERAGE (FIXED: Uses 'BOTH' as required by logs)
+        # 1. SET LEVERAGE (BINGX HEDGE MODE COMPATIBLE)
         try: 
             exchange.set_leverage(leverage, leverage_symbol, params={'side': 'BOTH'})
         except Exception as leverage_error:
@@ -62,7 +62,7 @@ def webhook():
             position_side = 'SHORT'
             close_side = 'BUY'
 
-        # ROI to Price conversion logic
+        # ROI to Price conversion
         tp_price_change = roi_tp / leverage
         sl_price_change = roi_sl / leverage
 
@@ -76,7 +76,7 @@ def webhook():
         tp_price = float(exchange.price_to_precision(ccxt_symbol, tp_price))
         sl_price = float(exchange.price_to_precision(ccxt_symbol, sl_price))
 
-        # 2. PLACE CLEAN MARKET POSITION ORDER
+        # 2. PLACE CLEAN MARKET POSITION ORDER (No mixed params)
         order_params = {'positionSide': position_side}
         main_order = exchange.create_order(
             symbol=ccxt_symbol,
@@ -85,9 +85,9 @@ def webhook():
             amount=coin_amount,
             params=order_params
         )
-        print(f"Main Position Opened successfully: {main_order.get('id')}")
+        print(f"Main Position Opened: {main_order.get('id')}")
 
-        # 3. PLACE SEPARATE TAKE PROFIT ORDER WITH REDUCE-ONLY
+        # 3. SEPARATE TAKE PROFIT ORDER (REDUCE-ONLY)
         try:
             tp_params = {
                 'positionSide': position_side,
@@ -101,11 +101,11 @@ def webhook():
                 amount=coin_amount,
                 params=tp_params
             )
-            print(f"Separate Take Profit placed at {tp_price}")
+            print(f"TP Trigger Set at: {tp_price}")
         except Exception as tp_err:
-            print(f"TP Trigger Warning: {tp_err}", file=sys.stderr)
+            print(f"TP Trigger Error: {tp_err}", file=sys.stderr)
 
-        # 4. PLACE SEPARATE STOP LOSS ORDER WITH REDUCE-ONLY
+        # 4. SEPARATE STOP LOSS ORDER (REDUCE-ONLY)
         try:
             sl_params = {
                 'positionSide': position_side,
@@ -119,13 +119,13 @@ def webhook():
                 amount=coin_amount,
                 params=sl_params
             )
-            print(f"Separate Stop Loss placed at {sl_price}")
+            print(f"SL Trigger Set at: {sl_price}")
         except Exception as sl_err:
-            print(f"SL Trigger Warning: {sl_err}", file=sys.stderr)
+            print(f"SL Trigger Error: {sl_err}", file=sys.stderr)
 
         return jsonify({
             "status": "success",
-            "message": "Order executed and independent SL/TP triggers set.",
+            "message": "Main position opened and independent triggers set successfully",
             "order_id": main_order.get('id')
         }), 200
 
