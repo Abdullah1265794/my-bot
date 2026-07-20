@@ -41,9 +41,9 @@ def webhook():
         ccxt_symbol = f"{symbol[:3]}/{symbol[3:]}:{symbol[3:]}"
         leverage_symbol = f"{symbol[:3]}/{symbol[3:]}"
 
-        # SET LEVERAGE WITH THE CORRECT SIDE PARAMETER
+        # FIX 1: EXACT BINGX HEDGE MODE LEVERAGE PARAMETER ('ALL')
         try: 
-            exchange.set_leverage(leverage, leverage_symbol, params={'side': 'BOTH'})
+            exchange.set_leverage(leverage, leverage_symbol, params={'side': 'ALL'})
         except Exception as leverage_error:
             print(f"Leverage Set Warning: {leverage_error}", file=sys.stderr)
 
@@ -74,11 +74,17 @@ def webhook():
         tp_price = float(exchange.price_to_precision(ccxt_symbol, tp_price))
         sl_price = float(exchange.price_to_precision(ccxt_symbol, sl_price))
 
-        # FIXED TRIGGER PARAMETERS THAT WORK WITHOUT PRE-EXISTING POSITIONS
+        # FIX 2: OFFICIAL BINGX PARAMS FOR COMBINED MARKET ORDER WITH SL/TP
         params = {
             'positionSide': position_side,
-            'slTriggerPrice': sl_price,
-            'tpTriggerPrice': tp_price
+            'takeProfit': {
+                'type': 'TAKE_PROFIT_MARKET',
+                'triggerPrice': tp_price
+            },
+            'stopLoss': {
+                'type': 'STOP_LOSS_MARKET',
+                'triggerPrice': sl_price
+            }
         }
 
         # MAIN ORDER PLACEMENT
@@ -92,7 +98,7 @@ def webhook():
 
         return jsonify({
             "status": "success",
-            "message": "Order placed successfully with independent SL/TP triggers",
+            "message": "Order placed successfully with SL/TP",
             "order_id": order.get('id')
         }), 200
 
