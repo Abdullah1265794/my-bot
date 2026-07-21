@@ -17,9 +17,12 @@ exchange = ccxt.bingx({
     'enableRateLimit': True
 })
 
+# VST / Demo Account Enable
+exchange.set_sandbox_mode(True)
+
 @app.route('/')
 def home():
-    return "BingX Bot is Running Successfully!"
+    return "BingX Demo Bot is Running!"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -35,15 +38,14 @@ def webhook():
         amount_usd = float(data.get('amount_usd', 10))   
         leverage = int(data.get('leverage', 50))         
         
-        # Direct ROI Input (25, 50, 75 etc.)
-        roi_tp = float(data.get('roi_tp', 50))  # Default 50% ROI
-        roi_sl = float(data.get('roi_sl', 50))  # Default 50% ROI
+        # ROI TP/SL Inputs
+        roi_tp = float(data.get('roi_tp', 50))  
+        roi_sl = float(data.get('roi_sl', 50))  
 
-        # AUTO CALCULATE Price Change Percentage based on ROI & Leverage
+        # ROI to Percentage Calculation
         tp_pct = (roi_tp / leverage) / 100
         sl_pct = (roi_sl / leverage) / 100
 
-        # Dynamic symbol parsing
         clean_symbol = symbol.replace('.P', '').replace('USDT', '')
         ccxt_symbol = f"{clean_symbol}/USDT:USDT"
         leverage_symbol = f"{clean_symbol}/USDT"
@@ -61,14 +63,14 @@ def webhook():
         except Exception as leverage_error:
             print(f"Leverage Set Warning: {leverage_error}", file=sys.stderr)
 
-        # 2. FETCH CURRENT PRICE & CALCULATE QUANTITY
+        # 2. FETCH PRICE & CALCULATE POSITION
         ticker = exchange.fetch_ticker(ccxt_symbol)
         price = float(ticker['last'])
 
         raw_amount = (amount_usd * leverage) / price
         coin_amount = float(exchange.amount_to_precision(ccxt_symbol, raw_amount))
 
-        # 3. CALCULATE TARGET PRICES BASED ON ROI
+        # 3. CALCULATE AUTO TP/SL PRICES
         if position_side == 'LONG':
             stop_loss_price = price * (1 - sl_pct)
             take_profit_price = price * (1 + tp_pct)
@@ -79,7 +81,7 @@ def webhook():
         stop_loss_price = float(exchange.price_to_precision(ccxt_symbol, stop_loss_price))
         take_profit_price = float(exchange.price_to_precision(ccxt_symbol, take_profit_price))
 
-        # 4. EXECUTE ORDER WITH BINGX TP/SL
+        # 4. EXECUTE DEMO ORDER WITH AUTO TP/SL
         params = {
             'positionSide': position_side,
             'stopLoss': {
@@ -102,7 +104,7 @@ def webhook():
 
         return jsonify({
             "status": "success",
-            "message": f"Order placed with ROI TP ({roi_tp}%) & SL ({roi_sl}%)!",
+            "message": "Demo order with Auto SL/TP executed successfully!",
             "order_id": order.get('id')
         }), 200
 
