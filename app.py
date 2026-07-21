@@ -32,12 +32,12 @@ def webhook():
 
         symbol = data.get('symbol', 'ETHUSDT')          
         action = data.get('action').lower()             
-        amount_usd = float(data.get('amount_usd', 10))   # Set safe default USDT margin
+        amount_usd = float(data.get('amount_usd', 10))   
         leverage = int(data.get('leverage', 20))         
         
-        # SL and TP percentage options (Optional from JSON webhook payload)
-        sl_pct = float(data.get('sl_pct', 0.01))  # Default 1% Stop Loss
-        tp_pct = float(data.get('tp_pct', 0.01))  # Default 1% Take Profit
+        # Stop loss and take profit percentages (default 1%)
+        sl_pct = float(data.get('sl_pct', 0.01))  
+        tp_pct = float(data.get('tp_pct', 0.01))  
 
         # Dynamic symbol parsing
         clean_symbol = symbol.replace('.P', '').replace('USDT', '')
@@ -51,7 +51,7 @@ def webhook():
             side = 'SELL'
             position_side = 'SHORT'
 
-        # 1. SET LEVERAGE SAFELY
+        # 1. SET LEVERAGE
         try: 
             exchange.set_leverage(leverage, leverage_symbol, params={'side': position_side})
         except Exception as leverage_error:
@@ -61,7 +61,6 @@ def webhook():
         ticker = exchange.fetch_ticker(ccxt_symbol)
         price = float(ticker['last'])
 
-        # Calculate coin amount based on allocated USD margin
         raw_amount = (amount_usd * leverage) / price
         coin_amount = float(exchange.amount_to_precision(ccxt_symbol, raw_amount))
 
@@ -76,16 +75,16 @@ def webhook():
         stop_loss_price = float(exchange.price_to_precision(ccxt_symbol, stop_loss_price))
         take_profit_price = float(exchange.price_to_precision(ccxt_symbol, take_profit_price))
 
-        # 4. EXECUTE ORDER WITH AUTOMATIC TP/SL
+        # 4. EXECUTE ORDER WITH BINGX-COMPATIBLE TP/SL TYPES
         params = {
             'positionSide': position_side,
             'stopLoss': {
                 'triggerPrice': stop_loss_price,
-                'type': 'market'
+                'type': 'STOP_MARKET'
             },
             'takeProfit': {
                 'triggerPrice': take_profit_price,
-                'type': 'market'
+                'type': 'TAKE_PROFIT_MARKET'
             }
         }
 
@@ -99,7 +98,7 @@ def webhook():
 
         return jsonify({
             "status": "success",
-            "message": "Order with Auto SL/TP executed successfully!",
+            "message": "Order placed with automatic SL/TP!",
             "order_id": order.get('id')
         }), 200
 
