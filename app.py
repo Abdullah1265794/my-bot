@@ -30,27 +30,20 @@ def webhook():
 
         print("Received Signal Data:", data)
 
-        symbol = data.get('symbol', 'BNBUSDT')          
+        symbol = data.get('symbol', 'ETHUSDT')          
         action = data.get('action').lower()             
-        amount_usd = float(data.get('amount_usd', 50))  
-        leverage = int(data.get('leverage', 50))        
+        amount_usd = float(data.get('amount_usd', 10))   # Set safe default USDT margin
+        leverage = int(data.get('leverage', 20))         
+        
+        # SL and TP percentage options (Optional from JSON webhook payload)
+        sl_pct = float(data.get('sl_pct', 0.01))  # Default 1% Stop Loss
+        tp_pct = float(data.get('tp_pct', 0.01))  # Default 1% Take Profit
 
-        ccxt_symbol = f"{symbol[:3]}/{symbol[3:]}:{symbol[3:]}"
-        leverage_symbol = f"{symbol[:3]}/{symbol[3:]}"
+        # Dynamic symbol parsing
+        clean_symbol = symbol.replace('.P', '').replace('USDT', '')
+        ccxt_symbol = f"{clean_symbol}/USDT:USDT"
+        leverage_symbol = f"{clean_symbol}/USDT"
 
-        # 1. SET LEVERAGE SAFELY WITH 'BOTH' SIDE FOR HEDGE MODE
-        try: 
-            exchange.set_leverage(leverage, leverage_symbol, params={'side': 'BOTH'})
-        except Exception as leverage_error:
-            print(f"Leverage Set Warning: {leverage_error}", file=sys.stderr)
-
-        # 2. FETCH CURRENT PRICE & CALCULATE COIN AMOUNT
-        ticker = exchange.fetch_ticker(ccxt_symbol)
-        price = float(ticker['last'])
-        raw_amount = (amount_usd * leverage) / price
-        coin_amount = float(exchange.amount_to_precision(ccxt_symbol, raw_amount))
-
-        # 3. DEFINE POSITION SIDE FOR HEDGE MODE
         if action == 'buy':
             side = 'BUY'
             position_side = 'LONG'
@@ -58,8 +51,44 @@ def webhook():
             side = 'SELL'
             position_side = 'SHORT'
 
-        # 4. PURE ORIGINAL CLEAN MARKET ORDER (Ensures manual SL/TP works perfectly)
-        params = {'positionSide': position_side}
+        # 1. SET LEVERAGE SAFELY
+        try: 
+            exchange.set_leverage(leverage, leverage_symbol, params={'side': position_side})
+        except Exception as leverage_error:
+            print(f"Leverage Set Warning: {leverage_error}", file=sys.stderr)
+
+        # 2. FETCH CURRENT PRICE & CALCULATE QUANTITY
+        ticker = exchange.fetch_ticker(ccxt_symbol)
+        price = float(ticker['last'])
+
+        # Calculate coin amount based on allocated USD margin
+        raw_amount = (amount_usd * leverage) / price
+        coin_amount = float(exchange.amount_to_precision(ccxt_symbol, raw_amount))
+
+        # 3. CALCULATE AUTO TP & SL PRICES
+        if position_side == 'LONG':
+            stop_loss_price = price * (1 - sl_pct)
+            take_profit_price = price * (1 + tp_pct)
+        else:
+            stop_loss_price = price * (1 + sl_pct)
+            take_profit_price = price * (1 - tp_pct)
+
+        stop_loss_price = float(exchange.price_to_precision(ccxt_symbol, stop_loss_price))
+        take_profit_price = float(exchange.price_to_precision(ccxt_symbol, take_profit_price))
+
+        # 4. EXECUTE ORDER WITH AUTOMATIC TP/SL
+        params = {
+            'positionSide': position_side,
+            'stopLoss': {
+                'triggerPrice': stop_loss_price,
+                'type': 'market'
+            },
+            'takeProfit': {
+                'triggerPrice': take_profit_price,
+                'type': 'market'
+            }
+        }
+
         order = exchange.create_order(
             symbol=ccxt_symbol,
             type='market',
@@ -70,7 +99,7 @@ def webhook():
 
         return jsonify({
             "status": "success",
-            "message": "Order placed successfully! Manual SL/TP is now unlocked.",
+            "message": "Order with Auto SL/TP executed successfully!",
             "order_id": order.get('id')
         }), 200
 
