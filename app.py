@@ -33,11 +33,15 @@ def webhook():
         symbol = data.get('symbol', 'ETHUSDT')          
         action = data.get('action').lower()             
         amount_usd = float(data.get('amount_usd', 10))   
-        leverage = int(data.get('leverage', 20))         
+        leverage = int(data.get('leverage', 50))         
         
-        # Stop loss and take profit percentages (default 1%)
-        sl_pct = float(data.get('sl_pct', 0.01))  
-        tp_pct = float(data.get('tp_pct', 0.01))  
+        # Direct ROI Input (25, 50, 75 etc.)
+        roi_tp = float(data.get('roi_tp', 50))  # Default 50% ROI
+        roi_sl = float(data.get('roi_sl', 50))  # Default 50% ROI
+
+        # AUTO CALCULATE Price Change Percentage based on ROI & Leverage
+        tp_pct = (roi_tp / leverage) / 100
+        sl_pct = (roi_sl / leverage) / 100
 
         # Dynamic symbol parsing
         clean_symbol = symbol.replace('.P', '').replace('USDT', '')
@@ -64,7 +68,7 @@ def webhook():
         raw_amount = (amount_usd * leverage) / price
         coin_amount = float(exchange.amount_to_precision(ccxt_symbol, raw_amount))
 
-        # 3. CALCULATE AUTO TP & SL PRICES
+        # 3. CALCULATE TARGET PRICES BASED ON ROI
         if position_side == 'LONG':
             stop_loss_price = price * (1 - sl_pct)
             take_profit_price = price * (1 + tp_pct)
@@ -75,7 +79,7 @@ def webhook():
         stop_loss_price = float(exchange.price_to_precision(ccxt_symbol, stop_loss_price))
         take_profit_price = float(exchange.price_to_precision(ccxt_symbol, take_profit_price))
 
-        # 4. EXECUTE ORDER WITH BINGX-COMPATIBLE TP/SL TYPES
+        # 4. EXECUTE ORDER WITH BINGX TP/SL
         params = {
             'positionSide': position_side,
             'stopLoss': {
@@ -98,7 +102,7 @@ def webhook():
 
         return jsonify({
             "status": "success",
-            "message": "Order placed with automatic SL/TP!",
+            "message": f"Order placed with ROI TP ({roi_tp}%) & SL ({roi_sl}%)!",
             "order_id": order.get('id')
         }), 200
 
