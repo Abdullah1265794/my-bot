@@ -81,17 +81,11 @@ def webhook():
         stop_loss_price = float(exchange.price_to_precision(ccxt_symbol, stop_loss_price))
         take_profit_price = float(exchange.price_to_precision(ccxt_symbol, take_profit_price))
 
-        # 4. EXECUTE DEMO ORDER WITH AUTO TP/SL
+        # 4. EXECUTE DEMO ORDER WITH ENTIRE POSITION TP/SL
         params = {
             'positionSide': position_side,
-            'stopLoss': {
-                'triggerPrice': stop_loss_price,
-                'type': 'STOP_MARKET'
-            },
-            'takeProfit': {
-                'triggerPrice': take_profit_price,
-                'type': 'TAKE_PROFIT_MARKET'
-            }
+            'stopLossPrice': stop_loss_price,
+            'takeProfitPrice': take_profit_price
         }
 
         order = exchange.create_order(
